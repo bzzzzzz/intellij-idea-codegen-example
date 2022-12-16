@@ -1,0 +1,68 @@
+abstract class CodeGenTask extends DefaultTask {
+    @Input
+    abstract Property<String> getClassName()
+
+    @OutputDirectory
+    abstract DirectoryProperty getOutput()
+
+    @TaskAction
+    def taskAction() {
+        def directory = getOutput().asFile.get()
+        def name = getClassName().get()
+        def file = new File(directory, "org/example/${name}.java")
+        file.parentFile.mkdirs()
+
+        file.text = """\
+package org.example;
+
+public class ${name} {
+    private final String name;
+
+    public ${name}(String name) {
+        this.name = name;
+    }
+
+    public String getName() {
+        return name;
+    }
+}
+"""
+    }
+}
+
+class CodeGenPlugin implements Plugin<Project> {
+    void apply(Project project) {
+        project.plugins.apply("java-library")
+        SourceSet generatedSourceSet = project.sourceSets.create("generated")
+        def directory = project.layout.projectDirectory.dir("src/generated/java")
+        generatedSourceSet.java.srcDir(directory)
+
+        def task = project.tasks.register("generateCode", CodeGenTask) {
+            it.className.set("Cat")
+            it.output.set(directory)
+        }
+
+        project.tasks.named(generatedSourceSet.compileJavaTaskName) { it.dependsOn(task) }
+
+        def jarTask = project.tasks.register(generatedSourceSet.jarTaskName, Jar) {
+            it.archiveClassifier.set("generated")
+            it.from(generatedSourceSet.output)
+        }
+
+        def configuration = project.configurations.create("generated")
+        configuration.extendsFrom(project.configurations.getByName(generatedSourceSet.runtimeClasspathConfigurationName))
+        project.artifacts.add(configuration.name, jarTask)
+
+        def component = project.components.java
+        component.addVariantsFromConfiguration(configuration) { it.mapToOptional() }
+
+        project.plugins.apply("idea")
+        project.idea.module.sourceDirs.addAll generatedSourceSet.java.getSrcDirs()
+    }
+}
+
+apply plugin: CodeGenPlugin
+
+repositories {
+    mavenCentral()
+}
